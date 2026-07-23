@@ -147,11 +147,6 @@ class SymbolWorker(threading.Thread):
         symbol = self.symbol
         timeframe = cfg["timeframe"]
 
-        # Safety: if stop requested, exit immediately
-        if self.stop_event.is_set():
-            logger.debug(f"[{symbol}] _tick() called but stop_event is set, returning early")
-            return
-
         # Safety: if trader is None (after force stop), skip tick
         if self.engine.trader is None:
             return
@@ -1081,48 +1076,41 @@ class BotEngine:
         return {"success": True, "message": "Bot started"}
 
     def stop(self):
-        """Stop all workers. ACTUALLY STOPS THEM."""
-        stopped_any = False
+        """Stop all workers cleanly without deadlock."""
+        # Get list of workers WITHOUT lock (avoid deadlock)
+        workers_to_stop = list(self.workers.items()) if self.workers else []
         
+        # Stop all workers (no lock needed for this)
+        for sym, w in workers_to_stop:
+            try:
+                w.stop_event.set()
+                logger.info(f"[{sym}] Stop event set")
+            except Exception as e:
+                logger.error(f"[{sym}] Error setting stop: {e}")
+        
+        # Wait for workers to exit (no lock needed)
+        for sym, w in workers_to_stop:
+            try:
+                w.join(timeout=5)
+                logger.info(f"[{sym}] Worker joined")
+            except Exception as e:
+                logger.error(f"[{sym}] Error joining: {e}")
+        
+        # Now use lock just to clear the dict
         with self.lock:
-            # Forcefully stop all workers
-            for sym, w in self.workers.items():
-                try:
-                    # Set stop event
-                    w.stop_event.set()
-                    logger.info(f"[{sym}] stop_event set, waiting for worker to exit...")
-                    stopped_any = True
-                except Exception as e:
-                    logger.error(f"Could not stop worker {sym}: {e}")
-            
-            # Wait for ALL workers to actually exit (max 5s per worker)
-            for sym, w in list(self.workers.items()):
-                try:
-                    is_alive_before = w.is_alive()
-                    w.join(timeout=5)
-                    is_alive_after = w.is_alive()
-                    if is_alive_before:
-                        logger.info(f"[{sym}] Worker was alive, after join: alive={is_alive_after}")
-                    if is_alive_after:
-                        logger.warning(f"[{sym}] Worker STILL ALIVE after 5s timeout! Force removing from dict.")
-                except Exception as e:
-                    logger.error(f"Error joining worker {sym}: {e}")
-            
-            # CLEAR workers dict regardless
             self.workers.clear()
             self.is_running = False
 
-        # Emit final status
+        # Emit status
         self._emit("status", {"running": False, "message": "Bot stopped"})
-        msg = "✅ Bot STOPPED. All workers terminated." if stopped_any else "⚠️ Bot already stopped (no workers found)"
-        self._emit("log", {"level": "info", "msg": msg})
-        logger.info(f"stop() completed. Workers stopped: {stopped_any}, remaining workers: {len(self.workers)}")
+        self._emit("log", {"level": "info", "msg": "✅ Bot STOPPED"})
+        logger.info(f"Bot stop completed. Workers: {len(self.workers)}")
         
         # Send notification
         try:
             self.notifier.notify_bot_stop()
         except Exception as e:
-            logger.error("Bot stop notification failed: %s", e)
+            logger.error("Stop notification failed: %s", e)
         
         return {"success": True, "message": "Bot stopped"}
 
