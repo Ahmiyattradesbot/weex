@@ -1,0 +1,15 @@
+# === SaaS App ===
+flask>=3.0
+flask-socketio>=5.3
+requests>=2.31
+python-socketio>=5.10
+python-engineio>=4.8
+
+# === Bot-Engine (subprocess needs these) ===
+binance-futures-connector>=1.5
+python-binance>=1.0
+pandas>=2.0
+numpy>=1.24
+pyarrow>=15.0
+python-dotenv>=1.0
+simple-websocket>=1.0
