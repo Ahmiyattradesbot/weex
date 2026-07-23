@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
     "take_profit_pct": 6,
     "mode": "both",
     "auto_start": False,
+    "debug_mode": False,  # Enable verbose error logging
     "telegram_enabled": False,
     "telegram_bot_token": "",
     "telegram_chat_id": "",

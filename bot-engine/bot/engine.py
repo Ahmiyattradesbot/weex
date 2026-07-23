@@ -896,6 +896,7 @@ class BotEngine:
         self.lock = threading.Lock()
         self.is_running = False
         self.active_symbol = None  # Which coin the UI is currently viewing
+        self.debug_mode = config.get("debug_mode", False)  # Enable verbose error logs
         # ===== MONITOR MODE =====
         # Always-on background thread that fetches balance, mark_price, chart
         # for the active symbol. Works even when bot is STOPPED, so user can
@@ -973,11 +974,18 @@ class BotEngine:
 
         self.config = config
         self.notifier.update_config(config)
+        self.debug_mode = config.get("debug_mode", False)
         try:
             self.trader = get_trader(config)
         except Exception as e:
+            debug_info = f"\n📋 DEBUG:\n  Exchange: {config.get('exchange')}\n  Testnet: {config.get('testnet')}\n  Keys provided: {bool(config.get('api_key', ''))}" if self.debug_mode else ""
+            error_msg = f"Exchange connection failed: {e}{debug_info}"
             logger.error("Failed to connect to exchange: %s", e)
-            return {"success": False, "error": f"Exchange connection failed: {e}"}
+            self._emit("log", {
+                "level": "error",
+                "msg": f"❌ {error_msg}"
+            })
+            return {"success": False, "error": error_msg}
 
         # Get symbols and leverage
         symbols = self._symbols_list()
@@ -1009,9 +1017,11 @@ class BotEngine:
                 else:
                     err = str(r.get("error", ""))
                     if "-2015" in err or "Invalid API-key" in err or "401" in err:
+                        # API AUTH FAILED
+                        debug_msg = f"\n📋 DEBUG INFO:\n  Response: {r}\n  Exchange: {cfg.get('exchange')}\n  Testnet: {cfg.get('testnet')}" if self.debug_mode else ""
                         self._emit("log", {
                             "level": "error",
-                            "msg": f"[{sym}] ❌ API AUTH FAILED: {err[:80]}. Force stopping bot."
+                            "msg": f"[{sym}] ❌ API AUTH FAILED: {err[:80]}.{debug_msg} Force stopping bot."
                         })
                         # Force stop: stop all workers and clear state
                         with self.lock:
