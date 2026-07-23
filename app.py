@@ -404,6 +404,10 @@ def stop_user_bot(user_id: str) -> dict:
             logger.error(f"Failed to kill by port {port}: {e}")
 
     DB.get("bot_processes", {}).pop(user_id, None)
+    
+    # Set flag to prevent auto-restart for 60 seconds
+    DB.setdefault("user_stopped_bots", {})[user_id] = datetime.now(timezone.utc).isoformat()
+    
     save_db(DB)
     logger.info(f"Stopped bot-engine for user {user_id}")
     return {"success": True, "message": "Bot stopped"}
@@ -1094,6 +1098,23 @@ def bot_api_proxy(path):
         return _handle_symbols(user)
 
     status = get_bot_status(user["id"])
+
+    # Check if user recently stopped bot manually (prevent auto-restart for 60s)
+    stopped_at = DB.get("user_stopped_bots", {}).get(user["id"])
+    if stopped_at:
+        try:
+            from datetime import datetime, timezone
+            stop_time = datetime.fromisoformat(stopped_at.replace("Z", "+00:00"))
+            elapsed = (datetime.now(timezone.utc) - stop_time).total_seconds()
+            if elapsed < 60:
+                # User recently stopped - don't auto-restart
+                return jsonify({"success": False, "error": f"Bot stopped by user. Try again in {int(60-elapsed)}s."}), 400
+            else:
+                # 60s passed, remove the flag
+                DB.get("user_stopped_bots", {}).pop(user["id"], None)
+                save_db(DB)
+        except:
+            pass
 
     if not status["running"] or not status.get("port"):
         if first_segment in ("start", "balance"):
