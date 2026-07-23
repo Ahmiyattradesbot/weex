@@ -41,7 +41,7 @@ import time
 import uuid
 import shutil
 import signal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -198,7 +198,7 @@ def check_subscription(user: dict) -> dict:
 
     try:
         expiry = datetime.fromisoformat(expires_at.replace("Z", ""))
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         days_left = (expiry - now).days
 
         if days_left <= 0:
@@ -337,7 +337,7 @@ def start_user_bot(user_id: str, write_config: bool = True) -> dict:
         DB.setdefault("bot_processes", {})[user_id] = {
             "pid": proc.pid,
             "port": port,
-            "started_at": datetime.utcnow().isoformat() + "Z",
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }
         save_db(DB)
 
@@ -533,7 +533,7 @@ def api_signup():
     role = "admin" if len(DB["users"]) == 0 else "user"
 
     user_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat()
 
     user = {
         "id": user_id,
@@ -688,22 +688,22 @@ def api_license_activate():
     # Check expiry
     try:
         expiry = datetime.fromisoformat(lic["expires_at"].replace("Z", ""))
-        if datetime.utcnow() > expiry:
+        if datetime.now(timezone.utc) > expiry:
             return jsonify({"success": False, "error": "License expire ho gaya. Admin se new license lein."})
     except:
         return jsonify({"success": False, "error": "License expiry check fail"})
 
     # Activate license for this user
     lic["used_by"] = user["id"]
-    lic["activated_at"] = datetime.utcnow().isoformat() + "Z"
+    lic["activated_at"] = datetime.now(timezone.utc).isoformat()
     lic["active"] = True
 
     # Update user subscription
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     user["subscription"] = {
         "plan": lic.get("plan", "basic"),
         "status": "active",
-        "started_at": now.isoformat() + "Z",
+        "started_at": now.isoformat(),
         "expires_at": lic["expires_at"],
     }
     user["license_key"] = key
@@ -1381,7 +1381,7 @@ def api_admin_login():
 
     if not admin_user:
         admin_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat()
         admin_user = {
             "id": admin_id,
             "email": "admin@tradebot.com",
@@ -1457,7 +1457,7 @@ def api_admin_create_license():
         parts.append(secrets.token_hex(2).upper())
     key = f"TRDBOT-{parts[0]}-{parts[1]}-{parts[2]}-{parts[3]}"
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires = now + timedelta(days=days)
 
     lic = {
@@ -1465,8 +1465,8 @@ def api_admin_create_license():
         "plan": plan,
         "days": days,
         "note": note,
-        "created_at": now.isoformat() + "Z",
-        "expires_at": expires.isoformat() + "Z",
+        "created_at": now.isoformat(),
+        "expires_at": expires.isoformat(),
         "used_by": None,
         "activated_at": None,
         "active": False,
@@ -1499,8 +1499,8 @@ def api_admin_revoke_license():
         user = DB["users"].get(lic["used_by"])
         if user:
             user["subscription"] = {"plan": "none", "status": "inactive",
-                                   "started_at": datetime.utcnow().isoformat() + "Z",
-                                   "expires_at": datetime.utcnow().isoformat() + "Z"}
+                                   "started_at": datetime.now(timezone.utc).isoformat(),
+                                   "expires_at": datetime.now(timezone.utc).isoformat()}
             # Stop their bot
             stop_user_bot(lic["used_by"])
 
@@ -1571,7 +1571,7 @@ def api_admin_delete():
 
 @app.route("/health")
 def health_check():
-    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"})
+    return jsonify({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
 
 def _keep_alive_ping():
     """Background thread that pings itself every 5 minutes to prevent Railway sleep."""
