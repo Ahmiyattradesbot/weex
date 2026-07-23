@@ -1013,11 +1013,15 @@ class BotEngine:
                             "level": "error",
                             "msg": f"[{sym}] ❌ API AUTH FAILED: {err[:80]}. Force stopping bot."
                         })
-                        # Stop the bot by stopping workers (don't touch is_running yet)
+                        # Force stop: stop all workers and clear state
                         with self.lock:
                             for w in self.workers.values():
-                                w.stop_event.set()
-                        # Now safely set is_running = False
+                                try:
+                                    w.stop_event.set()
+                                except Exception:
+                                    pass
+                            # Explicitly clear workers to ensure state consistency
+                            self.workers.clear()
                         self.is_running = False
                         self._emit("status", {"running": False, "message": "Bot stopped due to API error"})
                         return
@@ -1072,32 +1076,48 @@ class BotEngine:
         return {"success": True, "message": "Bot started"}
 
     def stop(self):
-        """Stop all workers."""
-        # Even if is_running is False, still try to stop workers if any exist
-        # This handles the case where bot crashed but workers are stuck
-        if not self.is_running and not self.workers:
-            return {"success": False, "error": "Bot not running"}
-
+        """Stop all workers. ALWAYS tries to stop, even if state is inconsistent."""
+        # ALWAYS try to stop, regardless of state flags.
+        # This handles edge cases where bot crashed, froze, or state got corrupted.
+        
+        stopped_any = False
+        
         with self.lock:
-            if not self.workers:
-                # No workers to stop, just mark as not running
-                self.is_running = False
-            else:
-                # Stop all workers
-                for sym, w in self.workers.items():
-                    w.stop_event.set()
-                for sym, w in self.workers.items():
-                    w.join(timeout=10)
-                self.workers.clear()
-                self.is_running = False
+            # Try to stop all workers if any exist
+            if self.workers:
+                try:
+                    for sym, w in self.workers.items():
+                        try:
+                            w.stop_event.set()
+                            stopped_any = True
+                        except Exception as e:
+                            logger.warning(f"Could not set stop event for {sym}: {e}")
+                    
+                    # Wait for all workers to exit (timeout 10s each)
+                    for sym, w in self.workers.items():
+                        try:
+                            w.join(timeout=10)
+                        except Exception as e:
+                            logger.warning(f"Could not join worker {sym}: {e}")
+                    
+                    self.workers.clear()
+                except Exception as e:
+                    logger.error(f"Error stopping workers: {e}")
+            
+            # Clear state flags
+            self.is_running = False
 
+        # Emit status regardless of whether we stopped anything
         self._emit("status", {"running": False, "message": "Bot stopped"})
-        self._emit("log", {"level": "info", "msg": "Bot STOPPED by user"})
+        msg = "Bot STOPPED by user" if stopped_any else "Bot stop request (already stopped or no workers)"
+        self._emit("log", {"level": "info", "msg": msg})
+        
         # Send notification
         try:
             self.notifier.notify_bot_stop()
         except Exception as e:
             logger.error("Bot stop notification failed: %s", e)
+        
         return {"success": True, "message": "Bot stopped"}
 
     def force_stop(self):
